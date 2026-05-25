@@ -739,7 +739,8 @@
   }
 
   function renderPieChart(distribution) {
-    const chart = echarts.init(document.getElementById('pie-chart'));
+    const chartDom = document.getElementById('pie-chart');
+    const chart = echarts.init(chartDom);
     const colors = ['#7c3aed','#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
     const data = distribution
       ? Object.entries(distribution).filter(([,v]) => v > 0).map(([name, value], i) => ({ name, value, itemStyle: { color: colors[i % colors.length] } }))
@@ -747,9 +748,18 @@
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: { trigger: 'item', formatter: '{b}: {c}条 ({d}%)', backgroundColor: '#21262d', borderColor: '#30363d', textStyle: { color: '#e6edf3' } },
-      legend: { orient: 'vertical', right: 10, top: 'center', textStyle: { color: '#8b949e', fontSize: 11 } },
+      legend: {
+        orient: 'horizontal',
+        bottom: 0,
+        left: 'center',
+        textStyle: { color: '#8b949e', fontSize: 11 },
+        itemWidth: 10,
+        itemHeight: 10,
+      },
       series: [{
-        type: 'pie', radius: ['40%', '70%'], center: ['38%', '50%'],
+        type: 'pie',
+        radius: ['38%', '65%'],
+        center: ['50%', '44%'],
         data,
         label: { show: false },
         emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(124,58,237,0.5)' } }
@@ -760,7 +770,10 @@
 
   function renderWordCloud(keywords) {
     const canvas = document.getElementById('wordcloud-canvas');
-    canvas.width = canvas.offsetWidth || 400;
+    // 用父容器实际宽度
+    const parent = canvas.parentElement;
+    const w = parent.clientWidth - 40;
+    canvas.width = w > 100 ? w : 400;
     canvas.height = 260;
 
     if (!keywords || keywords.length === 0) {
@@ -772,25 +785,29 @@
       return;
     }
 
-    // 统计频率
+    // 统计频率，过滤掉太短的词
     const freq = {};
-    keywords.forEach(k => { freq[k] = (freq[k] || 0) + 1; });
-    const wordList = Object.entries(freq).map(([word, count]) => [word, count * 20 + 14]);
+    keywords.forEach(k => {
+      if (k && k.length >= 2) freq[k] = (freq[k] || 0) + 1;
+    });
+    const wordList = Object.entries(freq).map(([word, count]) => [word, count * 16 + 12]);
 
     const colors = ['#7c3aed','#3b82f6','#10b981','#f59e0b','#a78bfa','#34d399','#60a5fa','#fbbf24'];
 
     try {
       WordCloud(canvas, {
         list: wordList,
-        gridSize: 8,
-        weightFactor: 1.5,
+        gridSize: 10,
+        weightFactor: 1.2,
         fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif',
         color: () => colors[Math.floor(Math.random() * colors.length)],
         backgroundColor: 'transparent',
-        rotateRatio: 0.3,
+        rotateRatio: 0.2,
         rotationSteps: 2,
-        shuffle: false,
+        shuffle: true,
         drawOutOfBound: false,
+        shrinkToFit: true,
+        minSize: 10,
       });
     } catch (e) {
       console.log('词云渲染:', e);
