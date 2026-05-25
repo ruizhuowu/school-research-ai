@@ -271,7 +271,7 @@
       color: #e6edf3;
       margin-bottom: 16px;
     }
-    #pie-chart { width: 100%; height: 260px; }
+    #pie-chart { width: 100%; height: 300px; }
     #wordcloud-canvas { width: 100%; height: 260px; border-radius: 8px; }
 
     .full-card {
@@ -748,22 +748,19 @@
     chart.setOption({
       backgroundColor: 'transparent',
       tooltip: { trigger: 'item', formatter: '{b}: {c}条 ({d}%)', backgroundColor: '#21262d', borderColor: '#30363d', textStyle: { color: '#e6edf3' } },
-      legend: {
-        orient: 'vertical',
-        right: '5%',
-        top: 'middle',
-        textStyle: { color: '#c9d1d9', fontSize: 12 },
-        itemWidth: 12,
-        itemHeight: 12,
-        itemGap: 10,
-        formatter: name => name,
-      },
       series: [{
         type: 'pie',
-        radius: ['42%', '72%'],
-        center: ['36%', '50%'],
+        radius: ['40%', '68%'],
+        center: ['50%', '50%'],
         data,
-        label: { show: false },
+        label: {
+          show: true,
+          color: '#c9d1d9',
+          fontSize: 11,
+          formatter: '{b}\n{d}%',
+          lineHeight: 16,
+        },
+        labelLine: { lineStyle: { color: '#30363d' } },
         emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(124,58,237,0.5)' } }
       }]
     });
