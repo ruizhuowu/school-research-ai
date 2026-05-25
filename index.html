@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>学校调研多智能体分析平台</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/wordcloud2.js/1.2.2/wordcloud2.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+      background: #0d1117;
+      color: #e6edf3;
+      min-height: 100vh;
+    }
+
+    /* ===== 顶部导航 ===== */
+    .header {
+      background: linear-gradient(135deg, #1a1f35 0%, #0d1117 100%);
+      border-bottom: 1px solid #21262d;
+      padding: 16px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .header-left { display: flex; align-items: center; gap: 12px; }
+    .logo {
+      width: 36px; height: 36px;
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+    .header-title { font-size: 18px; font-weight: 700; color: #fff; }
+    .header-sub { font-size: 12px; color: #8b949e; margin-top: 2px; }
+    .badge {
+      background: linear-gradient(135deg, #7c3aed22, #3b82f622);
+      border: 1px solid #7c3aed44;
+      color: #a78bfa;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+    }
+
+    /* ===== 主容器 ===== */
+    .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+
+    /* ===== 模型架构说明 ===== */
+    .arch-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+    }
+    .arch-item {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 12px;
+      color: #8b949e;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .arch-item .model-tag {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+    .v3-tag { background: #0d4a3a; color: #3ddc84; }
+    .r1-tag { background: #1a0a3a; color: #a78bfa; }
+
+    /* ===== 输入区域 ===== */
+    .input-section {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 12px;
+      padding: 28px;
+      margin-bottom: 24px;
+    }
+    .section-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 180px;
+      background: #0d1117;
+      border: 1px solid #30363d;
+      border-radius: 8px;
+      color: #e6edf3;
+      font-size: 14px;
+      padding: 14px;
+      resize: vertical;
+      font-family: inherit;
+      line-height: 1.6;
+      transition: border-color 0.2s;
+    }
+    textarea:focus { outline: none; border-color: #7c3aed; }
+    textarea::placeholder { color: #484f58; }
+    .sample-btns {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    .sample-btn {
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #8b949e;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .sample-btn:hover { background: #30363d; color: #e6edf3; }
+
+    .analyze-btn {
+      margin-top: 16px;
+      width: 100%;
+      padding: 14px;
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      letter-spacing: 1px;
+    }
+    .analyze-btn:hover { opacity: 0.9; }
+    .analyze-btn:active { transform: scale(0.99); }
+    .analyze-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    /* ===== 加载动画 ===== */
+    #loading-section {
+      display: none;
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 12px;
+      padding: 32px;
+      margin-bottom: 24px;
+    }
+    .loading-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 24px;
+      text-align: center;
+    }
+    .pipeline {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 32px;
+    }
+    .agent-node {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+    }
+    .agent-circle {
+      width: 56px; height: 56px;
+      border-radius: 50%;
+      background: #21262d;
+      border: 2px solid #30363d;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 22px;
+      transition: all 0.4s;
+      position: relative;
+    }
+    .agent-circle.active {
+      border-color: #7c3aed;
+      background: #1a0a3a;
+      box-shadow: 0 0 20px #7c3aed66;
+      animation: pulse 1s infinite;
+    }
+    .agent-circle.done {
+      border-color: #3ddc84;
+      background: #0d4a3a;
+      box-shadow: 0 0 12px #3ddc8444;
+    }
+    .agent-label {
+      font-size: 11px;
+      color: #8b949e;
+      text-align: center;
+      line-height: 1.3;
+    }
+    .agent-model {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .pipe-arrow {
+      color: #30363d;
+      font-size: 20px;
+      margin-bottom: 20px;
+    }
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 20px #7c3aed66; }
+      50% { box-shadow: 0 0 30px #7c3aedaa; }
+    }
+    .log-area {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 16px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      color: #3ddc84;
+      min-height: 100px;
+      max-height: 160px;
+      overflow-y: auto;
+    }
+    .log-line { margin-bottom: 4px; opacity: 0; animation: fadeIn 0.3s forwards; }
+    @keyframes fadeIn { to { opacity: 1; } }
+
+    /* ===== 结果区域 ===== */
+    #results-section { display: none; }
+
+    .metrics-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .metric-card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      padding: 20px;
+      text-align: center;
+    }
+    .metric-value {
+      font-size: 36px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .metric-label { font-size: 12px; color: #8b949e; margin-top: 4px; }
+
+    .charts-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .chart-card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      padding: 20px;
+    }
+    .chart-card-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #e6edf3;
+      margin-bottom: 16px;
+    }
+    #pie-chart { width: 100%; height: 260px; }
+    #wordcloud-canvas { width: 100%; height: 260px; border-radius: 8px; }
+
+    .full-card {
+      background: #161b22;
+      border: 1px solid #21262d;
+      border-radius: 10px;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+
+    /* ===== 优先级表格 ===== */
+    .priority-table { width: 100%; border-collapse: collapse; }
+    .priority-table th {
+      background: #21262d;
+      color: #8b949e;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 10px 14px;
+      text-align: left;
+    }
+    .priority-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid #21262d;
+      font-size: 13px;
+      color: #c9d1d9;
+    }
+    .priority-table tr:last-child td { border-bottom: none; }
+    .p0-badge { background: #ff000022; color: #f85149; border: 1px solid #f8514944; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .p1-badge { background: #fb8f0022; color: #fb8f00; border: 1px solid #fb8f0044; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+    .p2-badge { background: #3b82f622; color: #3b82f6; border: 1px solid #3b82f644; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+
+    /* ===== 策略卡片 ===== */
+    .strategy-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    .strategy-card {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-radius: 8px;
+      padding: 18px;
+      border-left: 3px solid #7c3aed;
+      transition: border-color 0.2s;
+    }
+    .strategy-card:hover { border-left-color: #3b82f6; }
+    .strategy-card-title { font-size: 15px; font-weight: 600; color: #fff; margin-bottom: 10px; }
+    .strategy-card-action { font-size: 13px; color: #8b949e; line-height: 1.6; margin-bottom: 10px; }
+    .strategy-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+    .strategy-tag {
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 4px;
+      background: #21262d;
+      color: #8b949e;
+    }
+    .priority-high { background: #1a0a3a; color: #a78bfa; }
+
+    /* ===== 报告区域 ===== */
+    .report-section-block { margin-bottom: 16px; }
+    .report-section-block h4 { font-size: 13px; color: #8b949e; margin-bottom: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+    .report-section-block p { font-size: 14px; color: #c9d1d9; line-height: 1.7; }
+
+    .executive-summary {
+      background: linear-gradient(135deg, #1a1f35, #0d1117);
+      border: 1px solid #7c3aed44;
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 14px;
+      color: #a78bfa;
+      line-height: 1.7;
+      margin-bottom: 16px;
+    }
+
+    /* ===== 按钮组 ===== */
+    .action-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
+      justify-content: center;
+    }
+    .btn-secondary {
+      padding: 10px 24px;
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #e6edf3;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-secondary:hover { background: #30363d; }
+    .btn-primary {
+      padding: 10px 24px;
+      background: linear-gradient(135deg, #7c3aed, #3b82f6);
+      border: none;
+      color: #fff;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: opacity 0.2s;
+    }
+    .btn-primary:hover { opacity: 0.9; }
+
+    /* ===== 错误提示 ===== */
+    #error-box {
+      display: none;
+      background: #ff000011;
+      border: 1px solid #f8514944;
+      border-radius: 8px;
+      padding: 16px;
+      color: #f85149;
+      margin-bottom: 16px;
+      font-size: 14px;
+    }
+
+    /* ===== 打印样式 ===== */
+    @media print {
+      .header, .input-section, #loading-section, .action-row, .arch-bar { display: none !important; }
+      body { background: #fff; color: #000; }
+      .full-card, .chart-card, .metric-card { background: #fff; border: 1px solid #ddd; }
+      .metric-value { color: #7c3aed; -webkit-text-fill-color: #7c3aed; }
+    }
+
+    @media (max-width: 768px) {
+      .metrics-row { grid-template-columns: repeat(2, 1fr); }
+      .charts-row { grid-template-columns: 1fr; }
+      .pipeline { gap: 4px; }
+      .pipe-arrow { font-size: 14px; }
+      .agent-circle { width: 44px; height: 44px; font-size: 18px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- 顶部 -->
+<div class="header">
+  <div class="header-left">
+    <div class="logo">🤖</div>
+    <div>
+      <div class="header-title">学校调研多智能体分析平台</div>
+      <div class="header-sub">School Research Multi-Agent Analysis System</div>
+    </div>
+  </div>
+  <div class="badge">⚡ 6 Agents · 混合模型架构</div>
+</div>
+
+<div class="container">
+
+  <!-- 模型架构说明 -->
+  <div class="arch-bar">
+    <div class="arch-item">🔀 路由员 <span class="model-tag v3-tag">V3</span></div>
+    <div class="arch-item">📋 提取员 <span class="model-tag v3-tag">V3</span></div>
+    <div class="arch-item">🗂️ 分类员 <span class="model-tag v3-tag">V3</span></div>
+    <div class="arch-item">⚖️ 评分员 <span class="model-tag v3-tag">V3-CoT</span></div>
+    <div class="arch-item">🧠 策略员 <span class="model-tag r1-tag">R1 推理</span></div>
+    <div class="arch-item">📝 报告员 <span class="model-tag v3-tag">V3</span></div>
+  </div>
+
+  <!-- 错误提示 -->
+  <div id="error-box"></div>
+
+  <!-- 输入区域 -->
+  <div class="input-section">
+    <div class="section-title">📥 输入调研数据</div>
+    <textarea id="input-text" placeholder="粘贴学校调研原始数据，支持家长反馈、教师意见、学生反馈等...
+
+例如：家长王女士反映，设备经常死机，孩子上课时突然黑屏，严重影响学习。另有多位家长表示APP界面太复杂，老人辅导孩子时完全看不懂..."></textarea>
+    <div class="sample-btns">
+      <span style="font-size:12px;color:#484f58;align-self:center;">样本数据：</span>
+      <button class="sample-btn" onclick="loadSample(1)">📍 成都双流实验小学</button>
+      <button class="sample-btn" onclick="loadSample(2)">📍 重庆南岸农村小学</button>
+      <button class="sample-btn" onclick="loadSample(3)">📍 广州番禺民办学校</button>
+    </div>
+    <button class="analyze-btn" id="analyze-btn" onclick="startAnalysis()">
+      🚀 启动多智能体分析
+    </button>
+  </div>
+
+  <!-- 加载动画 -->
+  <div id="loading-section">
+    <div class="loading-title">🤖 智能体流水线运行中...</div>
+    <div class="pipeline">
+      <div class="agent-node">
+        <div class="agent-circle" id="node-0">🔀</div>
+        <div class="agent-label">路由员<br><span class="model-tag v3-tag" style="font-size:9px">V3</span></div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="agent-node">
+        <div class="agent-circle" id="node-1">📋</div>
+        <div class="agent-label">提取员<br><span class="model-tag v3-tag" style="font-size:9px">V3</span></div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="agent-node">
+        <div class="agent-circle" id="node-2">🗂️</div>
+        <div class="agent-label">分类员<br><span class="model-tag v3-tag" style="font-size:9px">V3</span></div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="agent-node">
+        <div class="agent-circle" id="node-3">⚖️</div>
+        <div class="agent-label">评分员<br><span class="model-tag v3-tag" style="font-size:9px">V3</span></div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="agent-node">
+        <div class="agent-circle" id="node-4">🧠</div>
+        <div class="agent-label">策略员<br><span class="model-tag r1-tag" style="font-size:9px">R1</span></div>
+      </div>
+      <div class="pipe-arrow">→</div>
+      <div class="agent-node">
+        <div class="agent-circle" id="node-5">📝</div>
+        <div class="agent-label">报告员<br><span class="model-tag v3-tag" style="font-size:9px">V3</span></div>
+      </div>
+    </div>
+    <div class="log-area" id="log-area"></div>
+  </div>
+
+  <!-- 结果 -->
+  <div id="results-section">
+
+    <!-- 指标卡片 -->
+    <div class="metrics-row">
+      <div class="metric-card">
+        <div class="metric-value" id="m-total">-</div>
+        <div class="metric-label">提取痛点总数</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value" id="m-p0" style="background: linear-gradient(135deg,#f85149,#fb8f00);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">-</div>
+        <div class="metric-label">P0 紧急问题</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value" id="m-category">-</div>
+        <div class="metric-label">最大问题类别</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-value" id="m-strategy">-</div>
+        <div class="metric-label">优化策略数量</div>
+      </div>
+    </div>
+
+    <!-- 图表行 -->
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-card-title">📊 痛点分类分布</div>
+        <div id="pie-chart"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-title">☁️ 关键词词云</div>
+        <canvas id="wordcloud-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- 优先级矩阵 -->
+    <div class="full-card">
+      <div class="section-title">⚖️ 痛点优先级矩阵</div>
+      <div style="overflow-x:auto;">
+        <table class="priority-table" id="priority-table">
+          <thead>
+            <tr>
+              <th>优先级</th>
+              <th>痛点描述</th>
+              <th>影响力</th>
+              <th>紧迫度</th>
+              <th>综合得分</th>
+              <th>评分理由</th>
+            </tr>
+          </thead>
+          <tbody id="priority-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 执行摘要 -->
+    <div class="full-card">
+      <div class="section-title">🧠 策略员分析摘要（DeepSeek R1 推理）</div>
+      <div class="executive-summary" id="executive-summary"></div>
+
+      <!-- 策略卡片 -->
+      <div class="strategy-grid" id="strategy-grid"></div>
+    </div>
+
+    <!-- 报告 -->
+    <div class="full-card" id="report-card">
+      <div class="section-title">📝 调研分析报告</div>
+      <div id="report-content"></div>
+    </div>
+
+    <!-- 操作按钮 -->
+    <div class="action-row">
+      <button class="btn-secondary" onclick="resetAnalysis()">🔄 重新分析</button>
+      <button class="btn-primary" onclick="exportPDF()">📄 导出PDF报告</button>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // ===== 样本数据 =====
+  const samples = {
+    1: `成都双流实验小学调研数据（2024年秋季）
+
+家长访谈记录：
+- 王女士（3年级家长）：设备三个月就摔坏了，屏幕碎了，维修要等两周，孩子这段时间完全没法用。售后态度还不好，说是人为损坏不保修，但我们孩子只是正常使用。
+- 李先生（4年级家长）：APP每次更新后都要重新设置，孩子不会弄，我也不懂，每次都要打客服电话，等了半小时才接通。
+- 张女士（2年级家长）：英语听力模块声音质量很差，发音不准，老师说跟标准发音差距很大，会影响孩子语音习惯。
+- 刘先生（5年级家长）：充电线太容易断，三个月换了两根，还要自己去买，原装的买不到。
+
+教师反馈：
+- 陈老师（语文）：备课功能不好用，不能自定义题型，只能用系统内置的，很多时候满足不了教学需求。
+- 王老师（数学）：班级里有8个孩子的设备这学期出现过死机问题，影响课堂进度，每次都要单独处理。
+- 刘老师（英语）：内容库的英语视频太老了，有些还是五年前录制的，跟现在的教材对不上。
+
+学生反馈：
+- 多名学生反映游戏模式太难，打击积极性。
+- 有学生说广告太多，做题时突然弹出广告很烦。`,
+
+    2: `重庆南岸农村小学调研数据（2024年）
+
+现场走访记录：
+- 校长反映：学校网络不稳定，设备经常因为断网无法使用，但设备不支持离线模式，导致课程进行到一半就中断了。这个问题已经反映半年了，厂家说在开发但一直没有上线。
+- 多位家长表示：家里长辈不会用APP，孩子作业完成情况无法及时了解。家长端界面太复杂，老人完全不会操作，经常打电话给孩子家长，家长也很烦。
+- 李老师反馈：山区孩子基础差，但设备内容难度调节范围太窄，最低难度对这里的孩子来说还是太难，导致很多孩子失去学习兴趣，直接玩游戏去了。
+- 维修问题：距离最近的售后网点60公里，设备坏了要寄回去修，往返要两周，运费还要家长出。农村家庭觉得太麻烦，很多已经放弃使用了。
+- 数据隐私：有家长反映收到了推销电话，怀疑是购买设备时留的联系方式被泄露了，表示非常不满。`,
+
+    3: `广州番禺某民办学校调研（2025年初）
+
+焦点小组讨论记录：
+- 家长代表反映：设备每天使用时间限制不合理，孩子正在做作业突然锁屏，非常影响学习，但家长端解锁流程太复杂。
+- 多位家长提出：同班同学之间作业进度互相可见，涉及孩子隐私，担心造成不必要的比较和压力。
+- 教师团队反馈：系统没有与学校现有教务系统对接，老师要在两个平台分别操作，工作量翻倍，强烈要求打通系统。
+- 技术老师说：设备管理后台权限设计不合理，学校没有办法批量管理设备，只能一台一台设置，全校300台设备设置花了整整三天。
+- 家长王先生：孩子班上有同学破解了家长控制，自己在玩游戏，家长完全不知道，系统安全性存在漏洞。
+- 付费内容问题：很多核心内容要单独收费，已经买了设备还要继续付费购买课程，家长觉得被套路了，购买前没有说清楚。`
+  };
+
+  function loadSample(n) {
+    document.getElementById('input-text').value = samples[n];
+  }
+
+  // ===== 日志输出 =====
+  function addLog(msg) {
+    const area = document.getElementById('log-area');
+    const line = document.createElement('div');
+    line.className = 'log-line';
+    line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+    area.appendChild(line);
+    area.scrollTop = area.scrollHeight;
+  }
+
+  function setNodeActive(idx) {
+    for (let i = 0; i < 6; i++) {
+      const node = document.getElementById(`node-${i}`);
+      if (i < idx) node.className = 'agent-circle done';
+      else if (i === idx) node.className = 'agent-circle active';
+      else node.className = 'agent-circle';
+    }
+  }
+
+  // ===== 主分析函数 =====
+  async function startAnalysis() {
+    const text = document.getElementById('input-text').value.trim();
+    if (!text) {
+      showError('请先输入调研数据或选择样本数据！');
+      return;
+    }
+    if (text.length < 20) {
+      showError('输入内容太短，请提供更详细的调研数据（至少20字）');
+      return;
+    }
+
+    hideError();
+    document.getElementById('analyze-btn').disabled = true;
+    document.getElementById('results-section').style.display = 'none';
+    document.getElementById('loading-section').style.display = 'block';
+    document.getElementById('log-area').innerHTML = '';
+
+    // 模拟各阶段日志（与后端并行展示）
+    const logs = [
+      [0, '路由员启动：正在检测输入数据质量...'],
+      [1500, '路由员完成：数据质量合格，准入主流程 ✓'],
+      [2000, '提取员启动 (DeepSeek V3)：正在抽取痛点信息...'],
+      [4000, '分类员启动 (DeepSeek V3)：正在对痛点进行归类...'],
+      [6000, '评分员启动 (DeepSeek V3 CoT)：正在计算影响力×紧迫度...'],
+      [9000, '策略员启动 (DeepSeek R1 推理模型)：深度推理中，请稍候...'],
+      [20000, '策略员思考完成：生成优化策略 ✓'],
+      [21000, '报告员启动 (DeepSeek V3)：正在生成分析报告...'],
+    ];
+    const nodeTimings = [0, 2000, 4000, 6000, 9000, 21000];
+
+    logs.forEach(([delay, msg]) => {
+      setTimeout(() => addLog(msg), delay);
+    });
+    nodeTimings.forEach((delay, idx) => {
+      setTimeout(() => setNodeActive(idx), delay);
+    });
+
+    try {
+      addLog('正在连接 DeepSeek API...');
+
+      const response = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || '分析失败');
+      }
+
+      // 完成所有节点
+      for (let i = 0; i < 6; i++) {
+        setTimeout(() => {
+          document.getElementById(`node-${i}`).className = 'agent-circle done';
+        }, i * 100);
+      }
+      addLog('✅ 所有智能体完成！正在渲染结果...');
+
+      setTimeout(() => {
+        renderResults(data);
+        document.getElementById('loading-section').style.display = 'none';
+        document.getElementById('results-section').style.display = 'block';
+        document.getElementById('analyze-btn').disabled = false;
+        window.scrollTo({ top: document.getElementById('results-section').offsetTop - 20, behavior: 'smooth' });
+      }, 800);
+
+    } catch (err) {
+      document.getElementById('loading-section').style.display = 'none';
+      document.getElementById('analyze-btn').disabled = false;
+      showError('分析失败：' + err.message);
+    }
+  }
+
+  // ===== 渲染结果 =====
+  function renderResults(data) {
+    const { extract, classify, score, strategy, report, keywords } = data;
+
+    // 指标卡片
+    const totalPts = extract?.painPoints?.length || 0;
+    const p0Count = score?.prioritySummary?.P0 || 0;
+    const topCat = getTopCategory(classify?.distribution);
+    const stratCount = strategy?.strategies?.length || 0;
+
+    document.getElementById('m-total').textContent = totalPts;
+    document.getElementById('m-p0').textContent = p0Count;
+    document.getElementById('m-category').textContent = topCat || '-';
+    document.getElementById('m-strategy').textContent = stratCount;
+
+    // ECharts 饼图
+    renderPieChart(classify?.distribution);
+
+    // 词云
+    renderWordCloud(keywords || []);
+
+    // 优先级表格
+    renderPriorityTable(extract?.painPoints, score?.scores);
+
+    // 策略
+    document.getElementById('executive-summary').textContent = strategy?.executiveSummary || '';
+    renderStrategyCards(strategy?.strategies || []);
+
+    // 报告
+    renderReport(report);
+  }
+
+  function renderPieChart(distribution) {
+    const chart = echarts.init(document.getElementById('pie-chart'));
+    const colors = ['#7c3aed','#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
+    const data = distribution
+      ? Object.entries(distribution).filter(([,v]) => v > 0).map(([name, value], i) => ({ name, value, itemStyle: { color: colors[i % colors.length] } }))
+      : [];
+    chart.setOption({
+      backgroundColor: 'transparent',
+      tooltip: { trigger: 'item', formatter: '{b}: {c}条 ({d}%)', backgroundColor: '#21262d', borderColor: '#30363d', textStyle: { color: '#e6edf3' } },
+      legend: { orient: 'vertical', right: 10, top: 'center', textStyle: { color: '#8b949e', fontSize: 11 } },
+      series: [{
+        type: 'pie', radius: ['40%', '70%'], center: ['38%', '50%'],
+        data,
+        label: { show: false },
+        emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(124,58,237,0.5)' } }
+      }]
+    });
+    window.addEventListener('resize', () => chart.resize());
+  }
+
+  function renderWordCloud(keywords) {
+    const canvas = document.getElementById('wordcloud-canvas');
+    canvas.width = canvas.offsetWidth || 400;
+    canvas.height = 260;
+
+    if (!keywords || keywords.length === 0) {
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#484f58';
+      ctx.font = '14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('暂无关键词数据', canvas.width / 2, 130);
+      return;
+    }
+
+    // 统计频率
+    const freq = {};
+    keywords.forEach(k => { freq[k] = (freq[k] || 0) + 1; });
+    const wordList = Object.entries(freq).map(([word, count]) => [word, count * 20 + 14]);
+
+    const colors = ['#7c3aed','#3b82f6','#10b981','#f59e0b','#a78bfa','#34d399','#60a5fa','#fbbf24'];
+
+    try {
+      WordCloud(canvas, {
+        list: wordList,
+        gridSize: 8,
+        weightFactor: 1.5,
+        fontFamily: 'PingFang SC, Microsoft YaHei, sans-serif',
+        color: () => colors[Math.floor(Math.random() * colors.length)],
+        backgroundColor: 'transparent',
+        rotateRatio: 0.3,
+        rotationSteps: 2,
+        shuffle: false,
+        drawOutOfBound: false,
+      });
+    } catch (e) {
+      console.log('词云渲染:', e);
+    }
+  }
+
+  function renderPriorityTable(painPoints, scores) {
+    const tbody = document.getElementById('priority-tbody');
+    tbody.innerHTML = '';
+    if (!scores || scores.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="6" style="color:#484f58;text-align:center;">暂无评分数据</td></tr>';
+      return;
+    }
+
+    // 按得分排序
+    const sorted = [...scores].sort((a, b) => b.score - a.score);
+    sorted.forEach(s => {
+      const pt = painPoints?.find(p => p.id === s.id);
+      if (!pt) return;
+      const badgeClass = s.priority === 'P0' ? 'p0-badge' : s.priority === 'P1' ? 'p1-badge' : 'p2-badge';
+      const bar = '█'.repeat(s.score) + '░'.repeat(9 - s.score);
+      tbody.innerHTML += `
+        <tr>
+          <td><span class="${badgeClass}">${s.priority}</span></td>
+          <td style="max-width:280px;line-height:1.5">${pt.text || '-'}</td>
+          <td style="color:#a78bfa">${'★'.repeat(s.impact)}${'☆'.repeat(3 - s.impact)}</td>
+          <td style="color:#f59e0b">${'★'.repeat(s.urgency)}${'☆'.repeat(3 - s.urgency)}</td>
+          <td><span style="color:#3ddc84;font-family:monospace;font-size:11px">${bar}</span> ${s.score}</td>
+          <td style="color:#8b949e;font-size:12px">${s.reasoning || '-'}</td>
+        </tr>`;
+    });
+  }
+
+  function renderStrategyCards(strategies) {
+    const grid = document.getElementById('strategy-grid');
+    grid.innerHTML = '';
+    strategies.forEach((s, i) => {
+      const prioClass = s.priority === '高' ? 'priority-high' : '';
+      grid.innerHTML += `
+        <div class="strategy-card">
+          <div class="strategy-card-title">${i + 1}. ${s.title || '优化策略'}</div>
+          <div class="strategy-card-action">${s.action || ''}</div>
+          <div style="font-size:12px;color:#3ddc84;margin-bottom:8px">预期效果：${s.expectedResult || ''}</div>
+          <div class="strategy-meta">
+            <span class="strategy-tag ${prioClass}">优先级：${s.priority || '-'}</span>
+            <span class="strategy-tag">⏱ ${s.timeframe || '-'}</span>
+          </div>
+        </div>`;
+    });
+  }
+
+  function renderReport(report) {
+    const el = document.getElementById('report-content');
+    if (!report) { el.innerHTML = '<p style="color:#484f58">报告生成失败</p>'; return; }
+    const s = report.sections || {};
+    el.innerHTML = `
+      ${s.overview ? `<div class="report-section-block"><h4>调研概述</h4><p>${s.overview}</p></div>` : ''}
+      ${s.mainIssues ? `<div class="report-section-block"><h4>主要问题</h4><p>${s.mainIssues}</p></div>` : ''}
+      ${s.recommendations ? `<div class="report-section-block"><h4>优先处理建议</h4><p>${s.recommendations}</p></div>` : ''}
+      ${s.conclusion ? `<div class="report-section-block"><h4>结语</h4><p>${s.conclusion}</p></div>` : ''}
+    `;
+  }
+
+  // ===== 工具函数 =====
+  function getTopCategory(dist) {
+    if (!dist) return '-';
+    let top = '', max = 0;
+    Object.entries(dist).forEach(([k, v]) => { if (v > max) { max = v; top = k; } });
+    return top || '-';
+  }
+
+  function showError(msg) {
+    const el = document.getElementById('error-box');
+    el.textContent = '⚠️ ' + msg;
+    el.style.display = 'block';
+  }
+
+  function hideError() {
+    document.getElementById('error-box').style.display = 'none';
+  }
+
+  function resetAnalysis() {
+    document.getElementById('results-section').style.display = 'none';
+    document.getElementById('input-text').value = '';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function exportPDF() {
+    window.print();
+  }
+</script>
+</body>
+</html>
