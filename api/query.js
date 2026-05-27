@@ -55,7 +55,7 @@ export default async function handler(req, res) {
     }
     if (!sqlData?.sql) throw new Error('AI未能生成有效的SQL，请换个问法重试');
 
-    const sql = sqlData.sql.trim();
+    const sql = sqlData.sql.trim().replace(/;+$/, '');
     if (!/^\s*SELECT/i.test(sql)) throw new Error('只支持查询操作');
     if (/\b(DROP|DELETE|UPDATE|INSERT|ALTER|CREATE|TRUNCATE|GRANT|REVOKE)\b/i.test(sql)) {
       throw new Error('检测到不允许的操作');
