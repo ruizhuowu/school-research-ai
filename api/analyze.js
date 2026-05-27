@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // 允许跨域
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -18,7 +17,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // ========== 路由员：质量预检 (DeepSeek V3) ==========
     const routerRaw = await callV3(API_KEY, `
 你是一个输入质量检测员。判断以下文本是否是有效的学校调研反馈数据。
 有效数据应包含：学生/家长/老师的反馈意见、对产品的评价或问题描述。
@@ -34,7 +32,6 @@ ${text}
       return res.status(400).json({ error: '输入内容不符合要求', reason: routerData.reason });
     }
 
-    // ========== 提取员：抽取痛点 (DeepSeek V3) ==========
     const extractRaw = await callV3(API_KEY, `
 你是一个专业的教育调研数据提取员。从以下学校调研文本中提取所有用户反馈的痛点和问题。
 
@@ -58,7 +55,6 @@ ${text}
     `);
     let extractData = safeParseJSON(extractRaw, { painPoints: [], totalCount: 0, summary: '提取完成' });
 
-    // ========== 分类员：归类整理 (DeepSeek V3) ==========
     const classifyRaw = await callV3(API_KEY, `
 你是一个教育产品痛点分类专家。将以下痛点按照7大类别进行分类。
 
@@ -90,7 +86,6 @@ ${JSON.stringify(extractData.painPoints)}
     `);
     let classifyData = safeParseJSON(classifyRaw, { categories: {}, distribution: {} });
 
-    // ========== 评分员：优先级打分 (DeepSeek V3 with CoT prompt) ==========
     const scoreRaw = await callV3(API_KEY, `
 你是一个资深产品优先级评估专家。请对每个痛点进行影响力×紧迫度打分。
 
@@ -122,7 +117,6 @@ ${JSON.stringify(extractData.painPoints)}
     `);
     let scoreData = safeParseJSON(scoreRaw, { scores: [], prioritySummary: { P0: 0, P1: 0, P2: 0 } });
 
-    // ========== 策略员：制定策略 (DeepSeek R1 推理模型) ==========
     const strategyRaw = await callR1(API_KEY, `
 你是一个资深K12教育智能设备产品经理。请基于以下调研分析数据，制定3-5条核心产品优化策略。
 
@@ -153,10 +147,8 @@ ${JSON.stringify(scoreData.scores?.filter(s => s.priority === 'P0'))}
   "executiveSummary": "给管理层的总结（100字以内）"
 }
     `);
-    // R1模型响应中提取JSON
     let strategyData = extractJSONFromR1(strategyRaw, { strategies: [], executiveSummary: '策略生成完成' });
 
-    // ========== 报告员：生成报告 (DeepSeek V3) ==========
     const reportRaw = await callV3(API_KEY, `
 你是一个专业的教育调研报告撰写员。根据以下分析结果，生成一份简洁专业的调研报告摘要。
 
@@ -190,11 +182,29 @@ ${JSON.stringify(scoreData.scores?.filter(s => s.priority === 'P0'))}
       keyMetrics: {}
     });
 
-    // 整合所有关键词用于词云
     const allKeywords = [];
     extractData.painPoints?.forEach(p => {
       if (p.keywords) allKeywords.push(...p.keywords);
     });
+
+    const SUPABASE_URL = process.env.SUPABASE_URL;
+    const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY;
+    if (SUPABASE_URL && SUPABASE_KEY) {
+      await saveToSupabase(SUPABASE_URL, SUPABASE_KEY, {
+        input_text: text.substring(0, 500),
+        total_pain_points: extractData.painPoints?.length || 0,
+        p0_count: scoreData.prioritySummary?.P0 || 0,
+        p1_count: scoreData.prioritySummary?.P1 || 0,
+        p2_count: scoreData.prioritySummary?.P2 || 0,
+        top_category: getTopCategory(classifyData.distribution),
+        pain_points: extractData.painPoints,
+        categories: classifyData.categories,
+        scores: scoreData.scores,
+        strategies: strategyData.strategies,
+        executive_summary: strategyData.executiveSummary,
+        keywords: allKeywords
+      });
+    }
 
     return res.status(200).json({
       success: true,
@@ -213,8 +223,6 @@ ${JSON.stringify(scoreData.scores?.filter(s => s.priority === 'P0'))}
     return res.status(500).json({ error: '分析过程出错', details: error.message });
   }
 }
-
-// ===== 工具函数 =====
 
 async function callV3(apiKey, prompt) {
   const res = await fetch('https://api.deepseek.com/chat/completions', {
@@ -262,7 +270,6 @@ function safeParseJSON(str, fallback) {
 }
 
 function extractJSONFromR1(str, fallback) {
-  // R1 模型可能包含思考过程，提取最后的JSON
   const matches = str.match(/\{[\s\S]*\}/g);
   if (matches && matches.length > 0) {
     for (let i = matches.length - 1; i >= 0; i--) {
@@ -279,4 +286,25 @@ function getTopCategory(distribution) {
     if (count > max) { max = count; top = cat; }
   }
   return top || '未知';
+}
+
+async function saveToSupabase(url, key, record) {
+  try {
+    const res = await fetch(`${url}/rest/v1/analyses`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${key}`,
+        'apikey': key,
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(record)
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      console.error('Supabase保存失败:', err);
+    }
+  } catch (e) {
+    console.error('Supabase连接错误:', e.message);
+  }
 }
