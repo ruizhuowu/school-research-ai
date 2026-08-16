@@ -56,7 +56,7 @@ export default async function handler(req, res) {
     }
     if (!sqlData?.sql) throw new Error('AI未能生成有效的SQL语句，请换个问法重试');
 
-    const sql = sqlData.sql.trim();
+    const sql = sqlData.sql.trim().replace(/;+\s*$/, '');
 
     // ===== 安全校验 =====
     if (!/^\s*SELECT/i.test(sql)) {
