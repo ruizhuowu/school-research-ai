@@ -21,7 +21,8 @@ CREATE TABLE IF NOT EXISTS public.analyses (
   strategy_count    INTEGER,                         -- 优化策略数量
   input_snippet     TEXT,                            -- 输入摘要（前120字）
   input_text        TEXT,                            -- 完整输入（前500字）
-  result_json       JSONB                            -- 完整分析结果
+  result_json       JSONB,                           -- 完整分析结果
+  embedding         TEXT                             -- 语义检索向量（JSON 数组字符串）
 );
 
 -- 常用索引：按用户 + 时间倒序查询（历史列表页）

@@ -150,6 +150,17 @@ SUPABASE_KEY = (
 USE_SUPABASE = bool(SUPABASE_URL and SUPABASE_KEY)
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'analysis_history.db')
 
+# ============================================================
+# 语义检索（可选）：嵌入向量 + 相似度搜索
+#   配置 EMBEDDING_API_KEY 后启用；默认对接硅基流动 SiliconFlow 免费 bge-m3
+#   （OpenAI 兼容 /embeddings 接口，也可换 OpenAI、DeepSeek 之外任意兼容服务）
+#   未配置时：历史页仅提供关键词搜索，不影响任何功能
+# ============================================================
+EMBEDDING_API_KEY = os.environ.get('EMBEDDING_API_KEY', '')
+EMBEDDING_BASE_URL = os.environ.get('EMBEDDING_BASE_URL', 'https://api.siliconflow.cn/v1').rstrip('/')
+EMBEDDING_MODEL = os.environ.get('EMBEDDING_MODEL', 'BAAI/bge-m3')
+USE_EMBEDDING = bool(EMBEDDING_API_KEY)
+
 
 def _sb_headers() -> dict:
     """Supabase REST API 通用请求头"""
@@ -160,9 +171,42 @@ def _sb_headers() -> dict:
     }
 
 
+def embed_text(text: str) -> list:
+    """调用 embedding API 生成向量；未配置 Key 或调用失败时返回空列表"""
+    if not USE_EMBEDDING or not (text or '').strip():
+        return []
+    try:
+        r = requests.post(
+            f'{EMBEDDING_BASE_URL}/embeddings',
+            headers={'Authorization': f'Bearer {EMBEDDING_API_KEY}', 'Content-Type': 'application/json'},
+            json={'model': EMBEDDING_MODEL, 'input': (text or '')[:2000]},
+            timeout=30,
+        )
+        if not r.ok:
+            print(f'[Embedding] 失败 {r.status_code}: {r.text[:200]}')
+            return []
+        return r.json()['data'][0]['embedding']
+    except Exception as e:  # noqa: BLE001
+        print(f'[Embedding] 异常: {e}')
+        return []
+
+
+def cosine_similarity(a: list, b: list) -> float:
+    """余弦相似度（0~1），任一为空/维度不一致返回 0"""
+    if not a or not b or len(a) != len(b):
+        return 0.0
+    try:
+        dot = sum(x * y for x, y in zip(a, b))
+        na = sum(x * x for x in a) ** 0.5
+        nb = sum(x * x for x in b) ** 0.5
+        return dot / (na * nb) if na and nb else 0.0
+    except Exception:  # noqa: BLE001
+        return 0.0
+
+
 def _build_record(username: str, input_text: str, result: dict) -> dict:
-    """将单次分析结果打包为待写入的记录（含所属用户名）"""
-    return {
+    """将单次分析结果打包为待写入的记录（含所属用户名 + 语义向量）"""
+    record = {
         'username': (username or '').strip() or '访客',
         'mode': result.get('mode', 'ai'),
         'total_pain_points': result.get('extract', {}).get('totalCount', 0),
@@ -175,6 +219,14 @@ def _build_record(username: str, input_text: str, result: dict) -> dict:
         'input_text': (input_text or '')[:500],
         'result_json': result,
     }
+    # 语义检索向量：原文 + 类别 + 摘要 组合后嵌入，JSON 数组字符串存储
+    combo = '\n'.join([
+        (input_text or '')[:2000],
+        f"最大问题类别：{record['top_category']}",
+        record['input_snippet'],
+    ])
+    record['embedding'] = json.dumps(embed_text(combo), ensure_ascii=False)
+    return record
 
 
 def init_db() -> None:
@@ -202,6 +254,7 @@ def init_db() -> None:
         ('username', "username TEXT NOT NULL DEFAULT '访客'"),
         ('input_text', 'input_text TEXT'),
         ('result_json', 'result_json TEXT'),
+        ('embedding', 'embedding TEXT'),
     ]:
         if col not in existing:
             conn.execute(f'ALTER TABLE analyses ADD COLUMN {ddl}')
@@ -227,8 +280,8 @@ def save_analysis(username: str, input_text: str, result: dict) -> None:
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         'INSERT INTO analyses (username, created_at, mode, total_pain_points, p0, p1, p2, '
-        'top_category, strategy_count, input_snippet, input_text, result_json) '
-        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
+        'top_category, strategy_count, input_snippet, input_text, result_json, embedding) '
+        'VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
         (
             record['username'],
             datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -242,6 +295,7 @@ def save_analysis(username: str, input_text: str, result: dict) -> None:
             record['input_snippet'],
             record['input_text'],
             json.dumps(record['result_json'], ensure_ascii=False),
+            record['embedding'],
         ),
     )
     conn.commit()
@@ -324,6 +378,91 @@ def clear_history(username: str = '') -> None:
     conn.close()
 
 
+def semantic_search(username: str = '', query: str = '', top_n: int = 10) -> pd.DataFrame:
+    """语义检索：问题 → 向量 → 与本人历史记录比对相似度，返回 topN（按相似度倒序）"""
+    qv = embed_text(query)
+    if not qv:
+        return pd.DataFrame()
+    uname = (username or '').strip() or '访客'
+    rows: list = []
+    if USE_SUPABASE:
+        try:
+            r = requests.get(
+                f'{SUPABASE_URL}/rest/v1/analyses',
+                headers=_sb_headers(),
+                params={
+                    'select': 'id,username,created_at,mode,total_pain_points,p0,p1,p2,'
+                              'top_category,strategy_count,input_snippet,embedding',
+                    'username': f'eq.{uname}',
+                    'order': 'created_at.desc',
+                    'limit': 500,
+                },
+                timeout=15,
+            )
+            if r.ok:
+                rows = r.json() or []
+            else:
+                print(f'[Supabase] 语义检索读取失败 {r.status_code}: {r.text[:200]}')
+        except Exception as e:  # noqa: BLE001
+            print(f'[Supabase] 语义检索读取异常: {e}')
+    else:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            cur = conn.execute(
+                'SELECT id, username, created_at, mode, total_pain_points, p0, p1, p2, '
+                'top_category, strategy_count, input_snippet, embedding '
+                'FROM analyses WHERE username = ? ORDER BY id DESC LIMIT 500', (uname,))
+            cols = [d[0] for d in cur.description]
+            rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+        finally:
+            conn.close()
+
+    hits = []
+    for row in rows:
+        try:
+            ev = json.loads(row.get('embedding') or '[]')
+        except Exception:  # noqa: BLE001
+            ev = []
+        sim = cosine_similarity(qv, ev)
+        if sim >= 0.45:  # 阈值：低于该值视为不相关
+            hits.append({**row, '相似度': round(sim * 100, 1)})
+    hits.sort(key=lambda x: x['相似度'], reverse=True)
+    if not hits:
+        return pd.DataFrame()
+    df = pd.DataFrame(hits[:top_n])
+    df['分析时间'] = pd.to_datetime(df['created_at']).dt.strftime('%Y-%m-%d %H:%M')
+    df = df.rename(columns={
+        'mode': '模式', 'total_pain_points': '痛点数', 'top_category': '最大类别',
+        'strategy_count': '策略数', 'input_snippet': '输入摘要',
+    })
+    return df[['id', '分析时间', '模式', '痛点数', '最大类别', '策略数', '输入摘要', '相似度']]
+
+
+def load_detail(record_id: int) -> dict:
+    """读取单条记录详情：{input_text, result}"""
+    if USE_SUPABASE:
+        try:
+            r = requests.get(
+                f'{SUPABASE_URL}/rest/v1/analyses',
+                headers=_sb_headers(),
+                params={'select': 'input_text,result_json', 'id': f'eq.{record_id}'},
+                timeout=10,
+            )
+            if r.ok and r.json():
+                row = r.json()[0]
+                return {'input_text': row.get('input_text', ''), 'result': row.get('result_json') or {}}
+            print(f'[Supabase] 详情读取失败 {r.status_code}: {r.text[:200]}')
+        except Exception as e:  # noqa: BLE001
+            print(f'[Supabase] 详情读取异常: {e}')
+        return {}
+    conn = sqlite3.connect(DB_PATH)
+    row = conn.execute('SELECT input_text, result_json FROM analyses WHERE id = ?', (record_id,)).fetchone()
+    conn.close()
+    if not row:
+        return {}
+    return {'input_text': row[0] or '', 'result': json.loads(row[1] or '{}')}
+
+
 init_db()
 
 # ============================================================
@@ -391,6 +530,10 @@ with st.sidebar:
     else:
         st.markdown('✅ **本地 SQLite**')
         st.caption('数据在项目目录 `analysis_history.db`，重启不丢失')
+    if USE_EMBEDDING:
+        st.caption(f'🧠 语义检索已启用（{EMBEDDING_MODEL}）')
+    else:
+        st.caption('🧠 语义检索未配置（配 `EMBEDDING_API_KEY` 后启用）')
     st.markdown('---')
     st.markdown('> 部署：`streamlit run streamlit_app.py`')
     st.markdown('> 说明：本地演示推荐留空 API Key，体验 AI → 规则自动降级；填入 Key 后使用完整 6 智能体流水线。')
@@ -814,16 +957,41 @@ with tab_history:
     cur_user = st.session_state.get('username', '访客')
     backend = '☁️ Supabase' if USE_SUPABASE else '💾 本地 SQLite'
     s1, s2 = st.columns([2, 1])
-    with s1:
-        keyword = st.text_input(
-            '🔍 搜索我的历史记录',
-            value=st.session_state.get('history_keyword', ''),
-            placeholder='输入关键词，如：维修、广告、网络…',
-            help='只搜索你自己名下的记录',
-        )
-        st.session_state['history_keyword'] = keyword
     with s2:
         st.metric('当前身份', cur_user, help='历史记录只显示这个用户名下的数据')
+
+    # —— AI 语义检索（自然语言问题 → 相关历史） ——
+    with st.expander('🤖 AI 语义检索（用一句话找相关历史，如"哪些记录提到了设备死机"）',
+                     expanded=USE_EMBEDDING):
+        if USE_EMBEDDING:
+            s_question = st.text_input('🔎 输入你的问题', key='semantic_q',
+                                       placeholder='例如：哪些记录提到了设备死机 / 售后维修 / 家长隐私？')
+            if st.button('🔍 开始语义检索', type='primary', key='semantic_btn'):
+                q = (s_question or '').strip()
+                if not q:
+                    st.warning('请先输入问题')
+                else:
+                    st.session_state['semantic_result'] = semantic_search(username=cur_user, query=q)
+            sres = st.session_state.get('semantic_result')
+            if sres is not None:
+                if not sres.empty:
+                    st.success(f'找到 {len(sres)} 条相关记录（相似度 ≥ 45%，按相关度排序）')
+                    st.dataframe(sres, use_container_width=True, hide_index=True)
+                    st.caption('提示：可到下方「记录详情查看」输入对应 #编号 查看完整报告')
+                else:
+                    st.info('没有找到相似度足够的历史记录，试试换一种问法或放宽条件')
+        else:
+            st.info('AI 语义检索需要配置 Embedding Key（默认对接硅基流动免费 bge-m3 模型）。'
+                    '配置方法见 README「云端部署」一节。当前可先用下方关键词搜索。')
+
+    with s1:
+        keyword = st.text_input(
+            '🔍 关键词搜索我的历史记录',
+            value=st.session_state.get('history_keyword', ''),
+            placeholder='输入关键词，如：维修、广告、网络…',
+            help='按关键字精确匹配；语义检索见上方展开区',
+        )
+        st.session_state['history_keyword'] = keyword
 
     df = load_history(username=cur_user, keyword=keyword)
     st.caption(f'持久化后端：{backend} · 当前显示 {cur_user} 的记录 · 最近 {len(df)} 条'
@@ -839,7 +1007,48 @@ with tab_history:
         h2.metric('累计发现 P0 问题', int(df['P0'].sum()))
         h3.metric('平均每次痛点数', round(float(df['痛点数'].mean()), 1))
         st.dataframe(df, use_container_width=True, hide_index=True)
+
+        # —— 可视化：问题类别分布 ——
+        cat_counts = df['最大类别'].dropna().value_counts()
+        if len(cat_counts) > 0:
+            fig = go.Figure(go.Bar(
+                x=list(cat_counts.index),
+                y=list(cat_counts.values),
+                marker_color='#7c3aed',
+                hovertemplate='%{x}: %{y} 次<extra></extra>',
+            ))
+            fig.update_layout(
+                template='plotly_dark', height=260,
+                margin=dict(l=10, r=10, t=20, b=10),
+                paper_bgcolor='rgba(0,0,0,0)', font=dict(color='#c9d1d9'),
+                yaxis_title='分析次数',
+            )
+            st.markdown('##### 📊 问题类别分布（按当前列表）')
+            st.plotly_chart(fig, use_container_width=True)
+
+        # —— 记录详情查看 ——
+        with st.expander('📄 记录详情查看', expanded=False):
+            id_map = dict(zip(df['id'].astype(str), df['分析时间'].astype(str)))
+            pick = st.selectbox(
+                '选择一条记录（按时间倒序）',
+                list(id_map.keys()),
+                format_func=lambda i: f'#{i} · {id_map[i]}',
+                key='detail_pick',
+            )
+            det = load_detail(int(pick))
+            if det:
+                c1, c2 = st.columns([1, 1])
+                with c1:
+                    st.markdown('**📥 原始输入（前500字）**')
+                    st.text(det['input_text'] or '（无）')
+                with c2:
+                    st.markdown('**🧠 策略员摘要**')
+                    st.text(det['result'].get('strategy', {}).get('executiveSummary', '（无）'))
+                st.markdown('**📝 报告结论**')
+                st.text(det['result'].get('report', {}).get('sections', {}).get('conclusion', '（无）'))
+
         if st.button(f'🗑️ 清空 {cur_user} 的历史记录', type='secondary'):
             clear_history(cur_user)
+            st.session_state.pop('semantic_result', None)
             st.success(f'已清空 {cur_user} 的历史记录')
             st.rerun()
