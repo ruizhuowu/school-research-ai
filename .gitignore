@@ -1,2 +1,6 @@
 .vercel
 .env*
+*.db
+*.log
+__pycache__/
+.streamlit/

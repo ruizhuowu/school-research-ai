@@ -346,6 +346,89 @@
       margin-bottom: 16px;
     }
 
+    /* ===== AI 可信度提示（第二/三层防护：风险提示 + 模式透明）===== */
+    .mode-badge-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+    }
+    .mode-badge {
+      padding: 5px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      letter-spacing: 0.5px;
+    }
+    .mode-badge.ai { background: #0d4a3a; color: #3ddc84; border: 1px solid #3ddc8444; }
+    .mode-badge.rule { background: #1a0a3a; color: #a78bfa; border: 1px solid #a78bfa44; }
+    .fallback-hint { font-size: 12px; color: #fb8f00; }
+    .ai-disclaimer {
+      background: #3b341a44;
+      border: 1px solid #f59e0b55;
+      border-radius: 8px;
+      padding: 12px 16px;
+      color: #fbbf24;
+      font-size: 13px;
+      margin-bottom: 16px;
+      line-height: 1.6;
+    }
+    /* ===== 来源追溯（第五层防护：每条结论可查证）===== */
+    .src-toggle {
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #8b949e;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      margin-top: 6px;
+      font-family: inherit;
+      transition: all 0.2s;
+    }
+    .src-toggle:hover { background: #30363d; color: #e6edf3; }
+    .source-box {
+      background: #0d1117;
+      border: 1px solid #21262d;
+      border-left: 3px solid #7c3aed;
+      border-radius: 4px;
+      padding: 8px 10px;
+      margin-top: 6px;
+      font-size: 12px;
+      color: #8b949e;
+      line-height: 1.5;
+    }
+    /* ===== 人工确认（第四层防护：AI 输出可编辑）===== */
+    .editable-text { cursor: pointer; transition: color 0.2s; }
+    .editable-text:hover { color: #a78bfa; text-decoration: underline dotted; }
+    .pain-input {
+      background: #0d1117;
+      border: 1px solid #7c3aed;
+      color: #e6edf3;
+      border-radius: 4px;
+      padding: 4px 6px;
+      font-size: 13px;
+      width: 92%;
+      font-family: inherit;
+      outline: none;
+    }
+    .score-select {
+      background: #0d1117;
+      border: 1px solid #30363d;
+      color: #a78bfa;
+      border-radius: 4px;
+      padding: 2px 4px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .score-select:hover { border-color: #7c3aed; }
+    .edit-hint { font-size: 11px; color: #484f58; margin: 0 0 8px 2px; }
+
     /* ===== 按钮组 ===== */
     .action-row {
       display: flex;
@@ -582,6 +665,15 @@
   <!-- 结果 -->
   <div id="results-section">
 
+    <!-- AI 可信度提示：模式透明 + 风险提示前置（第三/二层防护）-->
+    <div class="mode-badge-row">
+      <span class="mode-badge ai" id="mode-badge">🤖 AI 增强模式</span>
+      <span class="fallback-hint" id="fallback-hint" style="display:none;"></span>
+    </div>
+    <div class="ai-disclaimer" id="ai-disclaimer">
+      🤖 本结果由 AI 生成，关键数据请人工核对 · 每条痛点可点击「查看原文」溯源验证
+    </div>
+
     <!-- 指标卡片 -->
     <div class="metrics-row">
       <div class="metric-card">
@@ -806,7 +898,28 @@
           document.getElementById(`node-${i}`).className = 'agent-circle done';
         }, i * 100);
       }
-      addLog('✅ 所有智能体完成！正在渲染结果...');
+      // 第一层防护提示：如果触发了降级，明确告知用户当前模式
+      if (data.mode === 'rule') {
+        addLog('⚠️ AI 服务不可用，已自动降级到【基础规则模式】（无需 AI 也能分析）');
+      }
+
+      // 支柱2：上下文工程 —— 展示预处理信息（清洗/分块/裁剪）
+      const ctx = data.contextInfo;
+      if (ctx) {
+        if (ctx.removedLines > 0) {
+          addLog(`🧹 输入清洗：移除 ${ctx.removedLines} 行噪声/重复内容（${ctx.originalChars} → ${ctx.cleanedChars} 字符）`);
+        }
+        if (ctx.chunkCount > 1) {
+          addLog(`📦 长文本分块：拆为 ${ctx.chunkCount} 块并行提取，按原文去重合并（去重 ${ctx.dedupCount} 条）`);
+        }
+        if (ctx.trimmedCount > 0) {
+          addLog(`✂️ 上下文裁剪：策略员仅接收 top 高分痛点，裁剪 ${ctx.trimmedCount} 条低优先级痛点上下文`);
+        }
+        if (ctx.removedLines <= 0 && ctx.chunkCount <= 1 && ctx.trimmedCount <= 0) {
+          addLog('🧹 输入检查：文本干净，无需清洗/分块/裁剪');
+        }
+      }
+      addLog('✅ 分析完成！正在渲染结果...');
 
       setTimeout(() => {
         renderResults(data);
@@ -824,7 +937,30 @@
   }
 
   // ===== 渲染结果 =====
+
+  // 第四层防护：人工确认 —— 全局保存当前结果，供"编辑→导出"闭环使用
+  let currentResult = null;
+
   function renderResults(data) {
+    currentResult = data;
+    // 模式透明：根据后端 mode 字段切换徽章（ai / rule）
+    const isRuleMode = data.mode === 'rule';
+    const badge = document.getElementById('mode-badge');
+    const hint = document.getElementById('fallback-hint');
+    const disclaimer = document.getElementById('ai-disclaimer');
+    if (isRuleMode) {
+      badge.className = 'mode-badge rule';
+      badge.textContent = '📋 基础模式（规则提取）';
+      hint.style.display = 'block';
+      hint.textContent = '⚠️ ' + (data.fallbackReason || 'AI服务暂不可用，已自动降级到规则模式');
+      disclaimer.textContent = '📋 当前为规则模式结果，非 AI 生成 · 建议在 AI 服务恢复后重新分析以获得更精准建议';
+    } else {
+      badge.className = 'mode-badge ai';
+      badge.textContent = '🤖 AI 增强模式';
+      hint.style.display = 'none';
+      disclaimer.textContent = '🤖 本结果由 AI 生成，关键数据请人工核对 · 每条痛点可点击「查看原文」溯源验证';
+    }
+
     const { extract, classify, score, strategy, report, keywords } = data;
 
     // 指标卡片
@@ -960,16 +1096,109 @@
       if (!pt) return;
       const badgeClass = s.priority === 'P0' ? 'p0-badge' : s.priority === 'P1' ? 'p1-badge' : 'p2-badge';
       const bar = '█'.repeat(s.score) + '░'.repeat(9 - s.score);
+      // 第五层防护：来源追溯 —— 每条痛点可展开查看原文片段
+      const sourceHtml = pt.source
+        ? `<button class="src-toggle" onclick="toggleSource(this)">📎 查看原文</button>
+           <div class="source-box" style="display:none">${pt.source}</div>`
+        : '';
+      // 第四层防护：人工确认 —— 痛点文本可点击编辑，评分可直接下拉修改
       tbody.innerHTML += `
         <tr>
-          <td><span class="${badgeClass}">${s.priority}</span></td>
-          <td style="max-width:280px;line-height:1.5">${pt.text || '-'}</td>
-          <td style="color:#a78bfa">${'★'.repeat(s.impact)}${'☆'.repeat(3 - s.impact)}</td>
-          <td style="color:#f59e0b">${'★'.repeat(s.urgency)}${'☆'.repeat(3 - s.urgency)}</td>
-          <td><span style="color:#3ddc84;font-family:monospace;font-size:11px">${bar}</span> ${s.score}</td>
+          <td><span id="prio-${s.id}" class="${badgeClass}">${s.priority}</span></td>
+          <td style="max-width:280px;line-height:1.5">
+            <div class="editable-text" title="点击可编辑痛点描述" onclick="editPainText(this, ${s.id})">${pt.text || '-'}</div>
+            <div class="edit-hint">✏️ 点击痛点文字可编辑</div>
+            ${sourceHtml}
+          </td>
+          <td>
+            <select class="score-select" title="修改影响力" onchange="updateScore(${s.id}, 'impact', this.value)">
+              <option value="1" ${s.impact === 1 ? 'selected' : ''}>1·少数用户</option>
+              <option value="2" ${s.impact === 2 ? 'selected' : ''}>2·较多用户</option>
+              <option value="3" ${s.impact === 3 ? 'selected' : ''}>3·大多数用户</option>
+            </select>
+          </td>
+          <td>
+            <select class="score-select" title="修改紧迫度" onchange="updateScore(${s.id}, 'urgency', this.value)">
+              <option value="1" ${s.urgency === 1 ? 'selected' : ''}>1·可延后</option>
+              <option value="2" ${s.urgency === 2 ? 'selected' : ''}>2·近期处理</option>
+              <option value="3" ${s.urgency === 3 ? 'selected' : ''}>3·立即处理</option>
+            </select>
+          </td>
+          <td><span id="score-${s.id}"><span style="color:#3ddc84;font-family:monospace;font-size:11px">${bar}</span> ${s.score}</span></td>
           <td style="color:#8b949e;font-size:12px">${s.reasoning || '-'}</td>
         </tr>`;
     });
+  }
+
+  // 编辑痛点描述（点击文字 → 变成输入框 → 回车/失焦保存）
+  function editPainText(el, id) {
+    if (!currentResult) return;
+    if (el.querySelector('input')) return; // 已处于编辑态
+    const oldText = (el.textContent || '').trim();
+    const input = document.createElement('input');
+    input.className = 'pain-input';
+    input.value = oldText;
+    input.onkeydown = (e) => {
+      if (e.key === 'Enter') { input.blur(); e.preventDefault(); }
+      if (e.key === 'Escape') { input.value = oldText; input.blur(); }
+    };
+    input.onblur = () => {
+      const val = (input.value || '').trim();
+      const pt = currentResult.extract?.painPoints?.find(p => p.id === id);
+      if (pt && val && val !== oldText) {
+        pt.text = val; // 更新全局数据，导出时生效
+        addLog('✏️ 已手动修改痛点 #' + id + ' 的描述');
+      }
+      el.textContent = pt && pt.text ? pt.text : oldText;
+    };
+    el.textContent = '';
+    el.appendChild(input);
+    input.focus();
+    input.select();
+  }
+
+  // 修改评分（影响/紧迫 → 自动重算综合得分与优先级）
+  function updateScore(id, field, value) {
+    if (!currentResult) return;
+    const s = currentResult.score?.scores?.find(x => x.id === id);
+    if (!s) return;
+    s[field] = parseInt(value) || 1;
+    s.score = s.impact * s.urgency;
+    s.priority = s.score >= 7 ? 'P0' : s.score >= 4 ? 'P1' : 'P2';
+    s.reasoning = '人工调整：影响力' + s.impact + ' × 紧迫度' + s.urgency;
+    // 同步更新 UI：优先级徽章 + 得分条
+    const badgeEl = document.getElementById('prio-' + id);
+    if (badgeEl) {
+      const cls = s.priority === 'P0' ? 'p0-badge' : s.priority === 'P1' ? 'p1-badge' : 'p2-badge';
+      badgeEl.className = cls;
+      badgeEl.textContent = s.priority;
+    }
+    const scoreEl = document.getElementById('score-' + id);
+    if (scoreEl) {
+      const bar = '█'.repeat(s.score) + '░'.repeat(9 - s.score);
+      scoreEl.innerHTML = `<span style="color:#3ddc84;font-family:monospace;font-size:11px">${bar}</span> ${s.score}`;
+    }
+    updateSummaryUI();
+    addLog('✏️ 已手动调整痛点 #' + id + ' → ' + s.priority + '（' + s.impact + '×' + s.urgency + '=' + s.score + '分）');
+  }
+
+  // 重算优先级汇总并刷新指标卡片（编辑后保持数据一致）
+  function updateSummaryUI() {
+    if (!currentResult?.score?.scores) return;
+    const summary = { P0: 0, P1: 0, P2: 0 };
+    currentResult.score.scores.forEach(s => summary[s.priority]++);
+    currentResult.score.prioritySummary = summary;
+    const p0El = document.getElementById('m-p0');
+    if (p0El) p0El.textContent = summary.P0;
+  }
+
+  // 展开/收起原文片段
+  function toggleSource(btn) {
+    const box = btn.nextElementSibling;
+    if (!box) return;
+    const isHidden = box.style.display === 'none' || !box.style.display;
+    box.style.display = isHidden ? 'block' : 'none';
+    btn.textContent = isHidden ? '📎 收起原文' : '📎 查看原文';
   }
 
   function renderStrategyCards(strategies) {
