@@ -10,6 +10,7 @@
 """
 import concurrent.futures
 import json
+import os
 import re
 import time
 from typing import Any, Optional
@@ -17,6 +18,18 @@ from typing import Any, Optional
 import requests
 
 from rule_engine import rule_based_analysis
+
+# ============================================================
+# LLM 服务配置（环境变量可覆盖，默认 DeepSeek 官方）
+#   硅基流动示例（一个 Key 同时做分析 + 语义检索）：
+#     DEEPSEEK_API_KEY        = "sk-..."
+#     DEEPSEEK_BASE_URL       = "https://api.siliconflow.cn/v1"
+#     DEEPSEEK_V3_MODEL       = "deepseek-ai/DeepSeek-V3"
+#     DEEPSEEK_R1_MODEL       = "deepseek-ai/DeepSeek-R1"
+# ============================================================
+DEEPSEEK_BASE_URL = os.environ.get('DEEPSEEK_BASE_URL', 'https://api.deepseek.com').rstrip('/')
+DEEPSEEK_V3_MODEL = os.environ.get('DEEPSEEK_V3_MODEL', 'deepseek-chat')
+DEEPSEEK_R1_MODEL = os.environ.get('DEEPSEEK_R1_MODEL', 'deepseek-reasoner')
 
 # ============================================================
 # 支柱1：防幻觉 Prompt 体系
@@ -113,10 +126,10 @@ def call_v3(api_key: str, system_prompt: Optional[str], user_prompt: str) -> str
         messages.append({'role': 'system', 'content': system_prompt})
     messages.append({'role': 'user', 'content': user_prompt})
     resp = requests.post(
-        'https://api.deepseek.com/chat/completions',
+        f'{DEEPSEEK_BASE_URL}/chat/completions',
         headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
         json={
-            'model': 'deepseek-chat',
+            'model': DEEPSEEK_V3_MODEL,
             'messages': messages,
             'response_format': {'type': 'json_object'},
             'temperature': 0.3,
@@ -136,10 +149,10 @@ def call_r1(api_key: str, system_prompt: Optional[str], user_prompt: str) -> str
         messages.append({'role': 'system', 'content': system_prompt})
     messages.append({'role': 'user', 'content': user_prompt})
     resp = requests.post(
-        'https://api.deepseek.com/chat/completions',
+        f'{DEEPSEEK_BASE_URL}/chat/completions',
         headers={'Content-Type': 'application/json', 'Authorization': f'Bearer {api_key}'},
         json={
-            'model': 'deepseek-reasoner',
+            'model': DEEPSEEK_R1_MODEL,
             'messages': messages,
             'temperature': 1,
             'max_tokens': 4000,
